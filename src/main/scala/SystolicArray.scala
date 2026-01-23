@@ -4,30 +4,47 @@ import chisel3.util._
 
 class SystolicArray(val rows: Int, val cols: Int, val w: Int) extends Module {
   val io = IO(new Bundle {
-    val in_a = Input(Vec(rows, UInt(w.W))) // Entrées par la gauche
-    val in_b = Input(Vec(cols, UInt(w.W))) // Entrées par le haut
-    val ctrl_en = Input(Bool())
-    val results = Output(Vec(rows, Vec(cols, UInt((2*w).W))))
+    val load    = Input(Bool())
+    val en      = Input(Bool())
+
+    // Inputs: Vector of activations (left) and Weights/Partial Sums (top)
+    val in_v    = Input(Vec(rows, UInt(w.W)))
+    val in_w    = Input(Vec(cols, UInt((2*w).W)))
+
+    // Outputs: Bottom of the mesh
+    val out_res = Output(Vec(cols, UInt((2*w).W)))
   })
 
-  // Création de la grille de nœuds
+  // 1. Instantiate the grid
   val mesh = Seq.fill(rows, cols)(Module(new Node(w)))
 
+  // 2. Connect the nodes
   for (r <- 0 until rows) {
     for (c <- 0 until cols) {
       val node = mesh(r)(c)
-      node.io.ctrl_en := io.ctrl_en
 
-      // Horizontal DATA connexion
-      if (c == 0) node.io.in_a := io.in_a(r)
-      else node.io.in_a := mesh(r)(c - 1).io.out_a
+      // Global control signals
+      node.io.load := io.load
+      node.io.en   := io.en
 
-      // Vertical DATA connexion
-      if (r == 0) node.io.in_b := io.in_b(c)
-      else node.io.in_b := mesh(r - 1)(c).io.out_b
+      // Horizontal flow (Activations)
+      if (c == 0) {
+        node.io.in_v := io.in_v(r)
+      } else {
+        node.io.in_v := mesh(r)(c - 1).io.out_v
+      }
 
-      // Output
-      io.results(r)(c) := node.io.res
+      // Vertical flow (Weights or Partial Sums)
+      if (r == 0) {
+        node.io.in_w := io.in_w(c)
+      } else {
+        node.io.in_w := mesh(r - 1)(c).io.out_w_acc
+      }
+
+      // 3. Connect final outputs (from the last row)
+      if (r == rows - 1) {
+        io.out_res(c) := node.io.out_w_acc
+      }
     }
   }
 }
