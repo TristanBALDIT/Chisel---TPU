@@ -37,6 +37,7 @@ class SystolicArray(val rows: Int, val cols: Int, config: TpuConfig) extends Mod
       // Vertical flow (Weights or Partial Sums)
       if (r == 0) {
         node.io.in_w := io.in_w(c)
+        node.io.in_acc := 0.U
       } else {
         node.io.in_acc := mesh(r - 1)(c).io.out_acc
         node.io.in_w := mesh(r - 1)(c).io.out_w

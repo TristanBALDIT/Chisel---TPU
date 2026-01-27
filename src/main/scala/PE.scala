@@ -25,6 +25,7 @@ class PE(config: TpuConfig) extends Module {
 
   when(io.load) {
     weight   := io.in_w
+    next_acc := io.in_acc
   } .elsewhen(io.en) {
     next_acc := io.in_acc + product
   } .otherwise {
