@@ -26,25 +26,18 @@ class OutputSystem(val cols: Int, config: TpuConfig) extends Module {
   val fifoDeqs = VecInit(queues.map(_.io.deq))
   val colIdx = RegInit(0.U(log2Ceil(cols).W))
 
+  // 1. Connect the output stream to the currently selected FIFO
+  io.out_stream.valid := fifoDeqs(colIdx).valid
+  io.out_stream.bits  := fifoDeqs(colIdx).bits
 
-  // Default: Stream is not valid
-  io.out_stream.valid := false.B
-  io.out_stream.bits  := 0.U
-  for (i <- 0 until cols) { queues(i).io.deq.ready := false.B }
+  // 2. Drive the 'ready' signals for ALL FIFOs
+  for (i <- 0 until cols) {
+    // A FIFO is ready ONLY if it's the one currently selected AND the output accepts data
+    fifoDeqs(i).ready := (colIdx === i.U) && io.out_stream.ready
+  }
 
-  // Select the FIFO currently pointed to by colIdx
-  val currentQueue = fifoDeqs(colIdx)
-
-  when(currentQueue.valid) {
-    io.out_stream.valid := true.B
-    io.out_stream.bits  := currentQueue.bits
-
-    // When the Memory/Slave accepts the data (ready is high)
-    when(io.out_stream.ready) {
-      currentQueue.ready := true.B // Consume from FIFO
-
-      // Move to next column
-      colIdx := Mux(colIdx === (cols - 1).U, 0.U, colIdx + 1.U)
-    }
+  // 3. Increment the index when a successful handshake occurs
+  when(io.out_stream.fire) { // .fire is shorthand for (valid && ready)
+    colIdx := Mux(colIdx === (cols - 1).U, 0.U, colIdx + 1.U)
   }
 }
