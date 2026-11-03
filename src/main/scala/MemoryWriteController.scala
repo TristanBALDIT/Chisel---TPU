@@ -5,8 +5,8 @@ class MemoryWriteController(val rows: Int, val cols: Int, config: TpuConfig) ext
   val io = IO(new Bundle {
     // Control from TPU Controller
     val start       = Input(Bool())
-    val baseAddr    = Input(UInt(32.W))
-    val matrixWidth = Input(UInt(16.W)) // Total columns in the RAM matrix
+    val baseAddr    = Input(UInt(32.W))     // Base address for return space
+    val matrixWidth = Input(UInt(16.W))     // Total columns in the RAM matrix
 
     // From Systolic Array
     val in_res      = Input(Vec(cols, UInt(config.accWidth.W)))
