@@ -13,6 +13,7 @@ class SystolicArray(val rows: Int, val cols: Int, config: TpuConfig) extends Mod
 
     // Outputs: Bottom of the mesh
     val out_res = Output(Vec(cols, UInt(config.accWidth.W)))
+    val out_valid = Output(Vec(cols, Bool()))
   })
 
   // 1. Instantiate the grid
@@ -25,7 +26,9 @@ class SystolicArray(val rows: Int, val cols: Int, config: TpuConfig) extends Mod
 
       // Global control signals
       node.io.load := io.load
-      node.io.en   := io.en
+
+      // enable signal for PE propagate so PEs enabled only when true calculation needed
+      node.io.en := ShiftRegister(io.en, r + c)
 
       // Horizontal flow (Activations)
       if (c == 0) {
@@ -46,6 +49,8 @@ class SystolicArray(val rows: Int, val cols: Int, config: TpuConfig) extends Mod
       // 3. Connect final outputs (from the last row)
       if (r == rows - 1) {
         io.out_res(c) := node.io.out_acc
+        // FIX: Delay the valid signal by 1 cycle to align with the PE's MAC delay
+        io.out_valid(c) := RegNext(node.io.en, false.B)
       }
     }
   }

@@ -6,7 +6,7 @@ class SystolicArrayTester extends AnyFlatSpec with ChiselScalatestTester {
   // On utilise une config Int8 pour le test
   val cfg = Int8Config()
 
-  "SystolicArray" should "multiply 2x2 correctly" in {
+  "SystolicArray" should "multiply 2x2 correctly and assert valid signals" in {
     test(new SystolicArray(2, 2, cfg)).withAnnotations(Seq(WriteVcdAnnotation)) { dut =>
 
       // --- MATRICES DEFINITION ---
@@ -66,7 +66,13 @@ class SystolicArrayTester extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.in_v(0).poke(0.U)
       dut.io.in_v(1).poke(40.U)
 
+      dut.io.en.poke(false.B)
+
+      dut.io.out_res(0).expect(100.U)
+      dut.io.out_valid(0).expect(true.B) // Valid pipeline reaches col 0
+      dut.io.out_valid(1).expect(false.B) // Col 1 not ready yet
       println(s"T=2 | W_row0 * A_col0: ${dut.io.out_res(0).peek().litValue}")
+
       dut.clock.step()
 
       // T=3: Result for W_row0 * A_col1 &&  W_row1 * A_col0
@@ -86,6 +92,8 @@ class SystolicArrayTester extends AnyFlatSpec with ChiselScalatestTester {
       // Results expected :
       //    | 100  140 |
       //    | 140  200 |
+
+      dut.clock.step()
     }
   }
 }
