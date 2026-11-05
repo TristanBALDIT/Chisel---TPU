@@ -1,9 +1,6 @@
 import chisel3._
 import chisel3.util._
 
-import chisel3._
-import chisel3.util._
-
 class OutputSystemV2(val rows: Int, val cols: Int, config: TpuConfig) extends Module {
   val io = IO(new Bundle {
     val in_res     = Input(Vec(cols, UInt(config.accWidth.W)))
