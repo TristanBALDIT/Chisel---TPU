@@ -53,8 +53,8 @@ class SramOutputSystemTester extends AnyFlatSpec with ChiselScalatestTester {
     }
   }
 
-  it should "stall cleanly when backpressured by downstream" in {
-    test(new SramOutputSystem(2, 2, depth = 8, cfg)) { dut =>
+  it should "absorb downstream backpressure in the skid buffer and resume cleanly" in {
+    test(new SramOutputSystem(2, 2, depth = 8, cfg)).withAnnotations(Seq(WriteVcdAnnotation)) { dut =>
       dut.io.out_row.ready.poke(false.B) // Downstream stalls immediately
 
       // Send Row 0 and Row 1 with skew
@@ -106,7 +106,7 @@ class SramOutputSystemTester extends AnyFlatSpec with ChiselScalatestTester {
     val depth = 8
     val cols = 2
 
-    test(new SramOutputSystem(totalRows, cols, depth = depth, cfg)) { dut =>
+    test(new SramOutputSystem(totalRows, cols, depth = depth, cfg)).withAnnotations(Seq(WriteVcdAnnotation)) { dut =>
       dut.io.out_row.ready.poke(false.B)
       dut.io.stall.expect(false.B)
 
@@ -175,7 +175,7 @@ class SramOutputSystemTester extends AnyFlatSpec with ChiselScalatestTester {
     val depth = 8
     val cols = 2
 
-    test(new SramOutputSystem(totalRows, cols, depth = depth, cfg)) { dut =>
+    test(new SramOutputSystem(totalRows, cols, depth = depth, cfg)).withAnnotations(Seq(WriteVcdAnnotation)) { dut =>
       val testData = Seq.tabulate(totalRows)(r => Seq.tabulate(cols)(c => (r + 1) * 20 + c))
 
       // Downstream initially applies backpressure
@@ -252,7 +252,7 @@ class SramOutputSystemTester extends AnyFlatSpec with ChiselScalatestTester {
     val depth = 8
     val cols = 2
 
-    test(new SramOutputSystem(totalRows, cols, depth = depth, cfg)) { dut =>
+    test(new SramOutputSystem(totalRows, cols, depth = depth, cfg)).withAnnotations(Seq(WriteVcdAnnotation)) { dut =>
       val testData = Seq.tabulate(totalRows)(r => Seq.tabulate(cols)(c => (r + 1) * 15 + c))
 
       val colPtr = Array.fill(cols)(0)
@@ -324,7 +324,7 @@ class SramOutputSystemTester extends AnyFlatSpec with ChiselScalatestTester {
     val depth = 8
     val cols = 3
 
-    test(new SramOutputSystem(totalRows, cols, depth = depth, cfg)) { dut =>
+    test(new SramOutputSystem(totalRows, cols, depth = depth, cfg)).withAnnotations(Seq(WriteVcdAnnotation)) { dut =>
       dut.io.out_row.ready.poke(false.B)
       dut.io.stall.expect(false.B)
 
