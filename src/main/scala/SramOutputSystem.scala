@@ -4,21 +4,25 @@ import chisel3.util._
 /**
  * SRAM-Based Output System (Option C - TPU v1 Accumulator Buffer Architecture)
  *
- * Organizes accumulator storage into 'cols' independent SyncReadMem banks.
- * - Handles systolic skew naturally: Each column has its own write pointer.
- * - Conflict-free commit: Column (cols - 1) is the slowest column. When it writes,
- *   that row is committed across all banks.
- * - Parallel read: Emits a full unskewed row (Vec of cols) in a single cycle.
- * - Decoupled skid buffer: Absorbs the 1-cycle SyncReadMem read latency and provides
- *   clean zero-bubble backpressure handshakes.
- * - Dynamic stall generation: Signals upstream SystolicArray if memory approaches full.
+ * Convention (C = A * W, where A is M x K, W is K x N, and C is M x N, all row-major):
+ * - Organizes accumulator storage into 'cols' independent SyncReadMem banks.
+ * - Handles systolic skew naturally: Each PE column n (0 <= n < N) has its own write pointer.
+ * - Sub-matrix aware commit: When the last active PE column (matrixN - 1) writes,
+ *   Row m of C is committed across all banks, and inactive columns (c >= matrixN)
+ *   write 0 in lockstep so all write pointers stay aligned.
+ * - Parallel read: Emits Row m of C ([C(m,0), ..., C(m,N-1), 0, ...]) in a single cycle.
+ * - Decoupled skid buffer: Absorbs 1-cycle SyncReadMem read latency for zero-bubble handshakes.
+ * - Dynamic stall generation: Signals upstream SystolicArray when memory approaches capacity.
  */
 class SramOutputSystem(
   val rows: Int,
   val cols: Int,
   val depth: Int = 0, // 0 = automatic safe depth sizing
-  config: TpuConfig
+  val config: TpuConfig
 ) extends Module {
+  def this(config: TpuConfig, depth: Int) = this(config.rows, config.cols, depth, config)
+  def this(config: TpuConfig)             = this(config.rows, config.cols, 0, config)
+
   require(rows > 0 && cols > 0, "rows and cols must be positive integers")
 
   // Safe depth calculation:
@@ -26,8 +30,12 @@ class SramOutputSystem(
   // We need enough depth to hold the skew triangle plus rows in flight.
   val sramDepth = if (depth > 0) depth else 1 << log2Ceil((cols + rows + 4).max(8))
   val addrWidth = log2Ceil(sramDepth)
+  val nWidth    = log2Ceil(cols + 1)
 
   val io = IO(new Bundle {
+    // Cols of W (= cols of C) = active PE columns (1 <= matrixN <= cols)
+    val matrixN   = Input(UInt(nWidth.W))
+
     // Inputs from Systolic Array bottom edge
     val in_res    = Input(Vec(cols, UInt(config.accWidth.W)))
     val in_en     = Input(Vec(cols, Bool()))
@@ -42,20 +50,31 @@ class SramOutputSystem(
   // 1. Multi-bank on-chip SRAM (One SyncReadMem per column)
   val sramBanks = Seq.fill(cols)(SyncReadMem(sramDepth, UInt(config.accWidth.W)))
 
-  // 2. Independent write pointer per column
+  // 2. Row Completion & Commit Tracking
+  // In a systolic array, the last active column (matrixN - 1) arrives latest for any row.
+  val rowCommitted = if (cols == 1) {
+    (io.matrixN > 0.U) && io.in_en(0)
+  } else {
+    val idxWidth      = log2Ceil(cols)
+    val lastActiveCol = Mux(io.matrixN > 0.U, io.matrixN - 1.U, 0.U)(idxWidth - 1, 0)
+    (io.matrixN > 0.U) && io.in_en(lastActiveCol)
+  }
+
+  // 3. Independent write pointer per column
+  // Active columns write incoming results on in_en(c).
+  // Inactive columns (c >= matrixN) write 0 on rowCommitted to keep all pointers aligned.
   val wrPtrs = RegInit(VecInit(Seq.fill(cols)(0.U(addrWidth.W))))
 
   for (c <- 0 until cols) {
-    when(io.in_en(c)) {
-      sramBanks(c).write(wrPtrs(c), io.in_res(c))
+    val isActiveCol = c.U < io.matrixN
+    val doWrite     = Mux(isActiveCol, io.in_en(c), rowCommitted)
+    val writeData   = Mux(isActiveCol, io.in_res(c), 0.U)
+
+    when(doWrite) {
+      sramBanks(c).write(wrPtrs(c), writeData)
       wrPtrs(c) := Mux(wrPtrs(c) === (sramDepth - 1).U, 0.U, wrPtrs(c) + 1.U)
     }
   }
-
-  // 3. Row Completion & Commit Tracking
-  // In a systolic array, Col (cols - 1) arrives latest for any row.
-  // When Col (cols - 1) writes an element, that entire row is committed across all banks.
-  val rowCommitted = io.in_en(cols - 1)
 
   // 2-entry skid buffer to absorb 1-cycle SyncReadMem read latency (flow = true for zero-bubble cut-through)
   val skidBuffer = Module(new Queue(Vec(cols, UInt(config.accWidth.W)), entries = 2, flow = true))

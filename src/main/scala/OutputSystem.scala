@@ -1,10 +1,11 @@
 import chisel3._
 import chisel3.util._
 
-class OutputSystem(val cols: Int, config: TpuConfig) extends Module {
+class OutputSystem(val cols: Int, val config: TpuConfig) extends Module {
+  def this(config: TpuConfig) = this(config.cols, config)
+  require(cols > 0, "cols must be a positive integer")
+
   val io = IO(new Bundle {
-
-
     val in_res     = Input(Vec(cols, UInt(config.accWidth.W)))  // output of Systolic Array
     val in_en      = Input(Bool())                              // High when S.A. producing results
 
@@ -22,9 +23,9 @@ class OutputSystem(val cols: Int, config: TpuConfig) extends Module {
     // to prevent overflow, but here we assume the RAM is fast enough.
   }
 
-  //ROUND-ROBIN DRAINER (The FSM) : picks results one by one: Col0, then Col1, then Col2...
+  // ROUND-ROBIN DRAINER (The FSM) : picks results one by one: Col0, then Col1, then Col2...
   val fifoDeqs = VecInit(queues.map(_.io.deq))
-  val colIdx = RegInit(0.U(log2Ceil(cols).W))
+  val colIdx   = RegInit(0.U(log2Ceil(cols.max(2)).W))
 
   // 1. Connect the output stream to the currently selected FIFO
   io.out_stream.valid := fifoDeqs(colIdx).valid

@@ -1,7 +1,10 @@
 import chisel3._
 import chisel3.util._
 
-class OutputSystemV2(val rows: Int, val cols: Int, config: TpuConfig) extends Module {
+class OutputSystemV2(val rows: Int, val cols: Int, val config: TpuConfig) extends Module {
+  def this(config: TpuConfig) = this(config.rows, config.cols, config)
+  require(rows > 0 && cols > 0, "rows and cols must be positive integers")
+
   val io = IO(new Bundle {
     val in_res     = Input(Vec(cols, UInt(config.accWidth.W)))
     // FIX: Match SystolicArray's vectorized valid output
@@ -22,7 +25,7 @@ class OutputSystemV2(val rows: Int, val cols: Int, config: TpuConfig) extends Mo
   }
 
   // 2. Output Serialization Logic (Completing the Output System)
-  val colIdx = RegInit(0.U(16.W))
+  val colIdx = RegInit(0.U(log2Ceil(cols.max(2)).W))
 
   // Map queue outputs into Vecs for dynamic indexing
   val queueDeqValid = VecInit(queues.map(_.io.deq.valid))

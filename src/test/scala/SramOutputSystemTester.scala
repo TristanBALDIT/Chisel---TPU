@@ -7,6 +7,7 @@ class SramOutputSystemTester extends AnyFlatSpec with ChiselScalatestTester {
 
   "SramOutputSystem" should "absorb skewed outputs and emit parallel rows" in {
     test(new SramOutputSystem(2, 2, depth = 8, cfg)).withAnnotations(Seq(WriteVcdAnnotation)) { dut =>
+      dut.io.matrixN.poke(2.U)
       dut.io.out_row.ready.poke(true.B)
       dut.io.out_row.valid.expect(false.B)
       dut.io.stall.expect(false.B)
@@ -55,6 +56,7 @@ class SramOutputSystemTester extends AnyFlatSpec with ChiselScalatestTester {
 
   it should "absorb downstream backpressure in the skid buffer and resume cleanly" in {
     test(new SramOutputSystem(2, 2, depth = 8, cfg)).withAnnotations(Seq(WriteVcdAnnotation)) { dut =>
+      dut.io.matrixN.poke(2.U)
       dut.io.out_row.ready.poke(false.B) // Downstream stalls immediately
 
       // Send Row 0 and Row 1 with skew
@@ -107,6 +109,7 @@ class SramOutputSystemTester extends AnyFlatSpec with ChiselScalatestTester {
     val cols = 2
 
     test(new SramOutputSystem(totalRows, cols, depth = depth, cfg)).withAnnotations(Seq(WriteVcdAnnotation)) { dut =>
+      dut.io.matrixN.poke(cols.U)
       dut.io.out_row.ready.poke(false.B)
       dut.io.stall.expect(false.B)
 
@@ -176,6 +179,7 @@ class SramOutputSystemTester extends AnyFlatSpec with ChiselScalatestTester {
     val cols = 2
 
     test(new SramOutputSystem(totalRows, cols, depth = depth, cfg)).withAnnotations(Seq(WriteVcdAnnotation)) { dut =>
+      dut.io.matrixN.poke(cols.U)
       val testData = Seq.tabulate(totalRows)(r => Seq.tabulate(cols)(c => (r + 1) * 20 + c))
 
       // Downstream initially applies backpressure
@@ -253,6 +257,7 @@ class SramOutputSystemTester extends AnyFlatSpec with ChiselScalatestTester {
     val cols = 2
 
     test(new SramOutputSystem(totalRows, cols, depth = depth, cfg)).withAnnotations(Seq(WriteVcdAnnotation)) { dut =>
+      dut.io.matrixN.poke(cols.U)
       val testData = Seq.tabulate(totalRows)(r => Seq.tabulate(cols)(c => (r + 1) * 15 + c))
 
       val colPtr = Array.fill(cols)(0)
@@ -325,6 +330,7 @@ class SramOutputSystemTester extends AnyFlatSpec with ChiselScalatestTester {
     val cols = 3
 
     test(new SramOutputSystem(totalRows, cols, depth = depth, cfg)).withAnnotations(Seq(WriteVcdAnnotation)) { dut =>
+      dut.io.matrixN.poke(cols.U)
       dut.io.out_row.ready.poke(false.B)
       dut.io.stall.expect(false.B)
 
@@ -373,6 +379,83 @@ class SramOutputSystemTester extends AnyFlatSpec with ChiselScalatestTester {
       }
 
       dut.io.stall.expect(false.B)
+      dut.io.out_row.valid.expect(false.B)
+    }
+  }
+
+  it should "commit sub-matrices (matrixN < cols) and stay aligned for subsequent full-width runs" in {
+    test(new SramOutputSystem(3, 3, depth = 8, cfg)).withAnnotations(Seq(WriteVcdAnnotation)) { dut =>
+      dut.io.out_row.ready.poke(true.B)
+
+      // --- Phase 1: Sub-matrix with matrixN = 2 (Col 2 inactive) ---
+      dut.io.matrixN.poke(2.U)
+
+      // Cycle 0: Row 0, Col 0 = 10
+      dut.io.in_res(0).poke(10.U); dut.io.in_en(0).poke(true.B)
+      dut.io.in_res(1).poke(0.U);  dut.io.in_en(1).poke(false.B)
+      dut.io.in_res(2).poke(0.U);  dut.io.in_en(2).poke(false.B)
+      dut.clock.step()
+
+      // Cycle 1: Row 1, Col 0 = 20 | Row 0, Col 1 = 11 (commits Row 0)
+      dut.io.in_res(0).poke(20.U); dut.io.in_en(0).poke(true.B)
+      dut.io.in_res(1).poke(11.U); dut.io.in_en(1).poke(true.B)
+      dut.io.in_en(2).poke(false.B)
+      dut.clock.step()
+
+      // Cycle 2: Row 1, Col 1 = 21 (commits Row 1)
+      dut.io.in_en(0).poke(false.B)
+      dut.io.in_res(1).poke(21.U); dut.io.in_en(1).poke(true.B)
+      dut.io.in_en(2).poke(false.B)
+      dut.clock.step()
+
+      dut.io.in_en(0).poke(false.B)
+      dut.io.in_en(1).poke(false.B)
+      dut.io.in_en(2).poke(false.B)
+
+      // Row 0 = [10, 11, 0]
+      dut.io.out_row.valid.expect(true.B)
+      dut.io.out_row.bits(0).expect(10.U)
+      dut.io.out_row.bits(1).expect(11.U)
+      dut.io.out_row.bits(2).expect(0.U)
+      dut.clock.step()
+
+      // Row 1 = [20, 21, 0]
+      dut.io.out_row.valid.expect(true.B)
+      dut.io.out_row.bits(0).expect(20.U)
+      dut.io.out_row.bits(1).expect(21.U)
+      dut.io.out_row.bits(2).expect(0.U)
+      dut.clock.step()
+
+      dut.io.out_row.valid.expect(false.B)
+
+      // --- Phase 2: Immediately run full-width matrixN = 3 without reset ---
+      // Proves Col 2's write pointer stayed synchronized with Col 0 and Col 1!
+      dut.io.matrixN.poke(3.U)
+
+      // Skewed Row = [30, 31, 32]
+      dut.io.in_res(0).poke(30.U); dut.io.in_en(0).poke(true.B)
+      dut.io.in_en(1).poke(false.B); dut.io.in_en(2).poke(false.B)
+      dut.clock.step()
+
+      dut.io.in_en(0).poke(false.B)
+      dut.io.in_res(1).poke(31.U); dut.io.in_en(1).poke(true.B)
+      dut.io.in_en(2).poke(false.B)
+      dut.clock.step()
+
+      dut.io.in_en(0).poke(false.B); dut.io.in_en(1).poke(false.B)
+      dut.io.in_res(2).poke(32.U); dut.io.in_en(2).poke(true.B)
+      dut.clock.step()
+
+      dut.io.in_en(2).poke(false.B)
+      dut.clock.step() // 1-cycle SyncReadMem read latency
+
+      // Verify Row = [30, 31, 32]
+      dut.io.out_row.valid.expect(true.B)
+      dut.io.out_row.bits(0).expect(30.U)
+      dut.io.out_row.bits(1).expect(31.U)
+      dut.io.out_row.bits(2).expect(32.U)
+      dut.clock.step()
+
       dut.io.out_row.valid.expect(false.B)
     }
   }

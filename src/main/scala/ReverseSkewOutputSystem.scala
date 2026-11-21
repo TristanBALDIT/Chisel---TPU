@@ -18,8 +18,11 @@ class ReverseSkewOutputSystem(
   val rows: Int,
   val cols: Int,
   val fifoDepth: Int = 8,
-  config: TpuConfig
+  val config: TpuConfig
 ) extends Module {
+  def this(config: TpuConfig, fifoDepth: Int) = this(config.rows, config.cols, fifoDepth, config)
+  def this(config: TpuConfig)                 = this(config.rows, config.cols, 8, config)
+
   require(rows > 0 && cols > 0, "rows and cols must be positive integers")
   require(fifoDepth >= 4, "fifoDepth must be at least 4 to allow safe stall margin")
 

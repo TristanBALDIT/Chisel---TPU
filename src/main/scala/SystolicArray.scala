@@ -1,7 +1,10 @@
 import chisel3._
 import chisel3.util._
 
-class SystolicArray(val rows: Int, val cols: Int, config: TpuConfig) extends Module {
+class SystolicArray(val rows: Int, val cols: Int, val config: TpuConfig) extends Module {
+  def this(config: TpuConfig) = this(config.rows, config.cols, config)
+  require(rows > 0 && cols > 0, "rows and cols must be positive integers")
+
   val io = IO(new Bundle {
     // Control
     val load  = Input(Bool())

@@ -1,7 +1,10 @@
 import chisel3._
 import chisel3.util._
 
-class SkewBuffer(val rows: Int, config: TpuConfig) extends Module {
+class SkewBuffer(val rows: Int, val config: TpuConfig) extends Module {
+  def this(config: TpuConfig) = this(config.rows, config)
+  require(rows > 0, "rows must be a positive integer")
+
   val io = IO(new Bundle {
     val stall     = Input(Bool())
     val in        = Input(Vec(rows, UInt(config.dataWidth.W)))

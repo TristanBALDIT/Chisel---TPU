@@ -8,14 +8,14 @@ class SystolicArrayTester extends AnyFlatSpec with ChiselScalatestTester {
   "SystolicArray" should "multiply 2x2 correctly and assert valid signals" in {
     test(new SystolicArray(2, 2, cfg)).withAnnotations(Seq(WriteVcdAnnotation)) { dut =>
 
-      // --- MATRICES DEFINITION ---
-      // Matrix W (weights)       Matrix A (Activation)
-      // | 1  3 |            *    | 10  20 |
-      // | 2  4 |                 | 30  40 |
+      // --- MATRICES DEFINITION (C = A * W, all row-major) ---
+      // Matrix A (M=2 x K=2)     Matrix W (K=2 x N=2)     Result C = A * W (M=2 x N=2)
+      // | 10  30 |          *    | 1  2 |              =  | 100  140 |
+      // | 20  40 |               | 3  4 |                 | 140  200 |
       //
       // MATH CHECK:
-      // Row0: (1*10 + 3*30) = 100,  (1*20 + 3*40) = 140
-      // Row1: (2*10 + 4*30) = 140,  (2*20 + 4*40) = 200
+      // Row 0 of C: (10*1 + 30*3) = 100,  (10*2 + 30*4) = 140
+      // Row 1 of C: (20*1 + 40*3) = 140,  (20*2 + 40*4) = 200
 
       // Initialization
       dut.io.load.poke(false.B)
@@ -30,9 +30,9 @@ class SystolicArrayTester extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.in_w_valid(1).poke(false.B)
       dut.clock.step()
 
-      // --- PHASE 1 : WEIGHTS (Vertical Shift Register) ---
-      // Column 0: 1 (row 0), 3 (row 1)
-      // Column 1: 2 (row 0), 4 (row 1)
+      // --- PHASE 1 : WEIGHTS (Vertical Shift Register, Row-Major) ---
+      // Row 0 of W (PE Row 0): [1, 2]
+      // Row 1 of W (PE Row 1): [3, 4]
       dut.io.load.poke(true.B)
 
       // Cycle 0: bottom row of weights (3 and 4)
@@ -54,9 +54,9 @@ class SystolicArrayTester extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.in_w_valid(1).poke(false.B)
       dut.clock.step()
 
-      // --- PHASE 2: COMPUTE (Streaming with systolic skew) ---
-      // Matrix A = | 10  20 |
-      //            | 30  40 |
+      // --- PHASE 2: COMPUTE (Streaming Rows of A with systolic skew) ---
+      // Matrix A (row-major) = | 10  30 |  <- Row 0 (m=0)
+      //                        | 20  40 |  <- Row 1 (m=1)
 
       // T=0: A(0,0)=10 enters Row 0 (valid), Row 1 is idle/invalid
       dut.io.in_v(0).poke(10.U)
@@ -119,9 +119,9 @@ class SystolicArrayTester extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.in_w_valid(1).poke(false.B)
       dut.clock.step()
 
-      // Load 1x2 sub-matrix weight:
-      // Row 0 has weights [5, 7] (valid = true)
-      // Row 1 is inactive (valid = false)
+      // Load 1x2 sub-matrix weight W = [5, 7] (K=1 row, N=2 cols, row-major):
+      // PE Row 0 has Row 0 of W = [5, 7] (valid = true)
+      // PE Row 1 is inactive (valid = false)
       dut.io.load.poke(true.B)
       // Cycle 0: bottom row (Row 1) - marked invalid
       dut.io.in_w(0).poke(0.U)
@@ -142,8 +142,8 @@ class SystolicArrayTester extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.in_w_valid(1).poke(false.B)
       dut.clock.step()
 
-      // Stream a single vector [10] on Row 0 (Row 1 is inactive)
-      // Vector 0: 10 * [5, 7] = [50, 70]
+      // Stream A = [10] (M=1 x K=1) on Row 0 (Row 1 is inactive)
+      // C = A * W = [10] * [5, 7] = [50, 70]
       dut.io.in_v(0).poke(10.U)
       dut.io.in_v_valid(0).poke(true.B)
       dut.io.in_v(1).poke(0.U)
