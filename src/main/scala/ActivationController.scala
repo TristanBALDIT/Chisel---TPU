@@ -4,28 +4,50 @@ import chisel3.util._
 /**
  * ActivationController
  *
- * Controls the streaming of the Activation Matrix (V) from an on-chip
- * Memory-Mapped RAM (e.g. Dual-Port BRAM) into the Systolic Array.
+ * Controls the streaming of the Activation Matrix A (M x K) from an on-chip
+ * Memory-Mapped RAM (e.g. Dual-Port Activation BRAM) into the left edge
+ * of the Systolic Array via the integrated SkewBuffer.
  *
- * Features:
- * - Memory-Mapped registers: base address, vector count (M), and feature dimension (K).
- * - Automatic sub-matrix masking: generates valid tokens only for rows r < K.
- * - Integrated SkewBuffer: automatically staggers rows by their systolic skew delay.
- * - Full flow-control gating: freezes reading and skewing when downstream asserts 'stall'.
- * - Clean status signaling: 'busy' during execution, single-cycle 'done' pulse upon completion.
+ * Convention (C = A * W, where A is M x K and W is K x N, all row-major):
+ * - Activation BRAM is stored row-major (no transpose needed):
+ *     slot m (0 <= m < M) holds Row m of A = [A(m,0), A(m,1), ..., A(m,K-1)],
+ *     streamed at timestep m.
+ * - SkewBuffer delays PE Row k by k cycles so A(m, k) meets the vertical partial sum
+ *   at the exact right cycle.
+ *
+ * Can be instantiated either from a TpuConfig directly (`new ActivationController(cfg)`)
+ * or with explicit smaller dimensions for unit testing (`new ActivationController(rows, actBramDepth, cfg)`).
+ *
+ * Sizing:
+ * - matrixM width = log2Ceil(actBramDepth + 1) (M = rows of A / batch = streaming timesteps, M <= actBramDepth)
+ * - matrixK width = log2Ceil(rows + 1)         (K = cols of A = active PE rows, K <= rows)
+ * - mem_addr / baseAddr width = log2Ceil(actBramDepth)
  */
-class ActivationController(val rows: Int, config: TpuConfig) extends Module {
+class ActivationController(
+  val rows: Int,
+  val actBramDepth: Int,
+  val config: TpuConfig
+) extends Module {
+  def this(config: TpuConfig) = this(config.rows, config.actBramDepth, config)
+
+  require(rows > 0, "rows must be positive")
+  require(actBramDepth >= 2, "actBramDepth must be at least 2")
+
+  val kWidth    = log2Ceil(rows + 1)
+  val mWidth    = log2Ceil(actBramDepth + 1)
+  val addrWidth = log2Ceil(actBramDepth.max(2))
+
   val io = IO(new Bundle {
     // MMIO Control & Configuration
     val start       = Input(Bool())
-    val baseAddr    = Input(UInt(32.W))
-    val matrixM     = Input(UInt(16.W)) // Total vectors/timesteps (batch size or sequence length)
-    val matrixK     = Input(UInt(16.W)) // Active rows (K <= rows)
+    val baseAddr    = Input(UInt(addrWidth.W))
+    val matrixM     = Input(UInt(mWidth.W)) // Rows of A (batch) = streaming timesteps (M <= actBramDepth)
+    val matrixK     = Input(UInt(kWidth.W)) // Cols of A = active PE rows (K <= rows)
     val busy        = Output(Bool())
     val done        = Output(Bool())
 
     // Memory Interface (Connects to Port B of Activation BRAM)
-    val mem_addr    = Output(UInt(32.W))
+    val mem_addr    = Output(UInt(addrWidth.W))
     val mem_en      = Output(Bool())
     val mem_data    = Input(Vec(rows, UInt(config.dataWidth.W)))
 
@@ -42,14 +64,13 @@ class ActivationController(val rows: Int, config: TpuConfig) extends Module {
   val state = RegInit(sIdle)
 
   // Shadow configuration registers latched at 'start'
-  val baseAddrReg = RegInit(0.U(32.W))
-  val mReg        = RegInit(0.U(16.W))
-  val kReg        = RegInit(0.U(16.W))
+  val mReg = RegInit(0.U(mWidth.W))
+  val kReg = RegInit(0.U(kWidth.W))
 
   // Transfer counters
-  val addrReg    = RegInit(0.U(32.W))
-  val readCount  = RegInit(0.U(16.W))
-  val drainCount = RegInit(0.U(log2Ceil(rows + 2).W))
+  val addrReg    = RegInit(0.U(addrWidth.W))
+  val readCount  = RegInit(0.U(mWidth.W))
+  val drainCount = RegInit(0.U(log2Ceil(rows + 1).W))
 
   // Integrated SkewBuffer
   val skewBuffer = Module(new SkewBuffer(rows, config))
@@ -89,12 +110,11 @@ class ActivationController(val rows: Int, config: TpuConfig) extends Module {
     is(sIdle) {
       doneReg := false.B
       when(io.start) {
-        baseAddrReg := io.baseAddr
-        mReg        := io.matrixM
-        kReg        := io.matrixK
-        addrReg     := io.baseAddr
-        readCount   := 0.U
-        drainCount  := 0.U
+        mReg       := io.matrixM
+        kReg       := io.matrixK
+        addrReg    := io.baseAddr
+        readCount  := 0.U
+        drainCount := 0.U
 
         when(io.matrixM === 0.U || io.matrixK === 0.U) {
           // Zero-sized matrix: complete immediately

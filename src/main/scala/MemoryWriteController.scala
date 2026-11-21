@@ -1,7 +1,8 @@
 import chisel3._
 import chisel3.util._
 
-class MemoryWriteController(val rows: Int, val cols: Int, config: TpuConfig) extends Module {
+class MemoryWriteController(val rows: Int, val cols: Int, val config: TpuConfig) extends Module {
+  def this(config: TpuConfig) = this(config.rows, config.cols, config)
   val io = IO(new Bundle {
     val start       = Input(Bool())
     val baseAddr    = Input(UInt(32.W))
