@@ -1,0 +1,27 @@
+# sbt / Scala build artifacts
+target/
+project/target/
+project/project/
+*.class
+*.log
+
+# Chisel / ChiselTest simulation & waveforms
+test_run_dir/
+*.vcd
+*.fir
+*.lo.fir
+*.anno.json
+*.sv
+*.v
+
+# IDEs & Build Servers
+.idea/
+*.iml
+.bsp/
+.bloop/
+.metals/
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db

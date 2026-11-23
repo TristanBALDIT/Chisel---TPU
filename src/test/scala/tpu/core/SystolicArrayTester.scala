@@ -1,3 +1,6 @@
+package tpu.core
+
+import tpu.config._
 import chisel3._
 import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
